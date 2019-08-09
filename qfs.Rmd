@@ -1,0 +1,241 @@
+---
+title: "QFS"
+author: "Luis Daniel C."
+date: "8/6/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Contexto
+
+La Quality Feedback Survey es una encuesta de calidad que se le realiza a los clientes después de un determinado tiempo de compra del vehículo en la cual los clientes indican las dificultades y fallas que han tenido con los vehículos.
+
+Anteriormente, la información era recolectada por operadoras, con el "boom" de las TI, se pasó a un esquema de encuesta por correo electrónico, sin embargo, se ha perdido gran cantidad de detalle debido a que se cree que los usuarios son mucho menos precisos en la información suministrada.
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(tm)
+library(wordcloud)
+library(fitdistrplus)
+#Archivo base
+raw_qfs <- read_xlsx("QFS VERBATIMS COL 2018.xlsx", sheet = "W1")
+#Departamentos para completar la columna estado
+dptos <- read_xlsx("dptos.xlsx", sheet = "dep")
+#Un diccionario de palabras a eliminar
+diccionario <- read_lines("diccionario.txt")
+#regiones para completar columna región
+regiones <- read_xlsx("dptos.xlsx", sheet = "regiones") %>% 
+  mutate_all(~toupper(.)) %>% 
+  mutate_all(~str_trim(.))
+```
+
+```{r}
+glimpse(raw_qfs)
+
+qfs_data <- raw_qfs %>%
+  left_join(dptos, by = "Ciudad") %>%
+  mutate(Estado = DEPARTAMENTO) %>% 
+  dplyr::select(-DEPARTAMENTO) %>%
+  left_join(regiones, by = "Estado") %>% 
+  filter(!is.na(`TGW Versão`) & !is.na(`TGW Veiculo`) & !is.na(`TGW Marca`)) %>%
+  mutate(
+    Ciudad = as_factor(Ciudad),
+    Genero = as_factor(Genero),
+    Edad = as.integer(Edad),
+    `E-mail de recontato` = as_factor(`E-mail de recontato`),
+    `Telefone de recontato` = as_factor(`Telefone de recontato`),
+    Modelo = as_factor(Modelo),
+    Serie = as_factor(Serie),
+    Motor = as_factor(Motor),
+    `Tipo de Caja` = as_factor(`Tipo de Caja` ),
+    `Combustible usado` = as_factor(`Combustible usado`),
+    `Renault Metier Pre-afectado` = as_factor(`Renault Metier Pre-afectado`),
+    IC = as_factor(IC),
+    `Metier Reafetado` = as_factor(`Metier Reafetado`),
+    tgw = `TGW Versão`+`TGW Veiculo`+`TGW Marca`
+  ) 
+```
+
+## Exploración de los datos
+
+```{r}
+#Vista general
+glimpse(qfs_data)
+
+#Edades y géneros de los encuestados
+qfs_data %>%
+  filter(!is.na(Edad) & !is.na(Genero)) %>% 
+  ggplot(aes(Edad, fill = Genero)) +
+  geom_histogram(color = "black", bins = 20) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = "Distribución de edad de los encuestados con respecto a su género",
+       y = "Cantidad de respuestas")
+
+#Edad y modelos de vehículos
+qfs_data %>%
+  ggplot(aes(Edad, fill = Modelo)) +
+  geom_histogram(color = "black") +
+  labs(title = "Distribución de edad de los encuestados con respecto a sus modelos Renault",
+       y = "Cantidad de respuestas")
+```
+
+## Visualización de los Verbatim y análisis de sentimientos
+
+Existen 680 verbatims de los clientes, comentarios individuales que serán estudiados posteriormente por cada área afectada, sin embargo, vale la pena identificar las palabras más mencionadas por los clientes para hacerse una mejor idea de los problemas básicos.
+
+```{r}
+verbatim_tm <- qfs_data %>% 
+  filter(!is.na(Verbatim)) %>%
+  filter() %>% 
+  # Otros filtros
+  # & Modelo == "Duster"
+  # & (`Renault Metier Pre-afectado` == "DEP" | `Renault Metier Pre-afectado` == "DES" )
+  dplyr::select(Verbatim) %>%
+  as_vector() %>% 
+  VectorSource() %>% 
+  VCorpus() %>% 
+  tm_map(removeWords, stopwords(kind = "es")) %>%
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(tolower)) %>% 
+  tm_map(removeWords, c(diccionario,"vehículo","después","así","demás")) %>% 
+  tm_map(removePunctuation)
+
+
+filtrar_verbatim <- function(qfs, proyecto) {
+  verbatim <- qfs %>% 
+  filter(!is.na(Verbatim)) %>%
+  filter(case_when(
+    proyecto == "todos" ~ TRUE,
+    proyecto == "Duster" ~ Modelo == "Duster",
+    proyecto == "Duster Oroch" ~ Modelo == "Duster Oroch",
+    proyecto == "Logan" ~ Modelo == "Logan",
+    proyecto == "Sandero" ~ Modelo == "Sandero",
+    proyecto == "Captur" ~ Modelo == "Captur"
+                            )
+        ) %>% 
+  # Otros filtros
+  # & (`Renault Metier Pre-afectado` == "DEP" | `Renault Metier Pre-afectado` == "DES" )
+  dplyr::select(Verbatim) %>%
+  as_vector() %>% 
+  VectorSource() %>% 
+  VCorpus() %>% 
+  tm_map(removeWords, stopwords(kind = "es")) %>%
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(tolower)) %>% 
+  tm_map(removeWords, c(diccionario,"vehículo","después","así","demás")) %>% 
+  tm_map(removePunctuation)
+  return(verbatim)
+}
+palabras <- filtrar_verbatim(qfs_data, "Sandero")
+#Word Cloud
+wordcustom <- function(words, dir, title) {
+png(dir, width = 20, height = 20, units = "cm", res = 300)
+layout(matrix(c(1, 2), nrow=2), heights=c(1, 4))
+par(mar=rep(0, 4))
+plot.new()
+text(x=0.5, y=0.5, title)
+wordcloud(
+          words, min.freq = 4, 
+          random.order = FALSE, 
+          colors = brewer.pal(8, "Dark2"), 
+          scale=c(4,.2), 
+          rot.per=.30, 
+          max.words = 200
+          )
+dev.off()
+}
+
+wordcustom(palabras, 
+           "wordcloud_sandero.png", 
+           "Sentimiento SANDERO en verbatims de QFS Colombia W1-2018")
+```
+
+## Exploración de las columnas TGW
+
+```{r}
+qfs_data %>%  
+  ggplot(aes(Edad, `TGW Versão`)) +
+  geom_jitter()
+
+qfs_data %>%
+  ggplot(aes(tgw)) +
+  geom_histogram()
+```
+
+#Ajustando una distribución a tgw
+
+A continuación se intenta ajustar una distribución de probabilidad al proceso TGW, sin embargo, se concluye que esta no es una variable aleatoria a la que puede atribuírsele una distribución de probabilidad, ya que proviene de un proceso determinístico que una persona asigna mediante una metodología.
+
+```{r}
+tgw_vector <- qfs_data %>% 
+  dplyr::select(tgw) %>% 
+  as_vector()
+
+tgw_vector %>% 
+  descdist(boot = 1000)
+
+#No
+tgw_gamma <- fitdist(tgw_vector, distr = "gamma", method = "mle")
+plot(tgw_gamma)
+summary(tgw_gamma)
+#No
+tgw_normal <- fitdist(tgw_vector, distr = "norm")
+plot(tgw_normal)
+summary(tgw_normal)
+#No
+tgw_exp <- fitdist(tgw_vector, distr = "exp")
+plot(tgw_exp)
+summary(tgw_exp)
+```
+
+#Ajustando una distribución de probabilidad a la edad de los encuestados
+
+```{r}
+edad_vector <- qfs_data %>%
+  filter(!is.na(Edad)) %>% 
+  dplyr::select(Edad) %>% 
+  as_vector()
+
+edad_vector %>% 
+  descdist(boot = 1000)
+
+#Sesgo grande en la gráfica cuantil-cuantil, no se recomienda utilizar a pesar de que es relativamente buena - nok
+edad_normal <- fitdist(edad_vector, distr = "norm")
+plot(edad_normal)
+summary(edad_normal)
+
+#Presenta sesgos también pero mejora considerablemente en supuestos - ok
+edad_gamma <- fitdist(edad_vector, distr = "gamma")
+plot(edad_gamma)
+summary(edad_gamma)
+
+#problemas de supuestos y lack of fit en los cuantiles empíricos y teóricos - nok
+edad_weibull <- fitdist(edad_vector, distr = "weibull")
+plot(edad_weibull)
+summary(edad_weibull)
+
+#Simulación de 1000 edades Renault
+tibble(edad = rgamma(1000, 15.5553, rate = 0.378183)) %>% 
+  ggplot(aes(edad)) +
+  geom_histogram()
+
+#Gráfica de densidad de probabilidad de edad y mejores distribuciones ajustadas
+qfs_data %>%
+  filter(!is.na(Edad)) %>% 
+  ggplot(aes(Edad, fill = Modelo)) +
+  geom_histogram(aes(y = ..density..), binwidth = 3, fill = "gray90", color = "gray40") +
+  stat_function(fun = dgamma, args = list(shape = 15.5553, rate = 0.378183),
+                aes(color = "Gamma k = 15.55 rate = 0.37")) +
+  stat_function(fun = dnorm, args = list(mean = 41.13363, sd = 10.71254),
+                aes(color = "Normal mean = 41.13 sd = 10.71")) +
+  labs(title = "Densidad de probabilidad de Edad de clientes en QFS y mejores distribuciones",
+       subtitle = "Estimación realizada con información de la Wave 1 - 2018, n = 1386 y grupos de 3 años",
+       y = "Densidad de probabilidad",
+       colour = "Distribución")
+```

@@ -1,3 +1,6 @@
+#Abandoned the shiny app for Tableau RIP 11/9/2019
+#Further code will be made on riesgo_planos_data_wrangle.Rmd
+
 library(shiny)
 library(tidyverse)
 library(plotly)

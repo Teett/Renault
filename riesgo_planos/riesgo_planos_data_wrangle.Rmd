@@ -62,8 +62,10 @@ planos_count <- planos_rta %>%
 
 ```{r}
 pt1_planos <- raw_planos %>%
-    #Simplificación evitando estados
+    #Simplificación evitando estados de madurez extraños y eliminando GDGADM
     filter(Maturity == "Validated" | Maturity == "Refused") %>%
+  filter(`Route State` == "Finished" | `Route State` == "Stopped") %>%
+  filter(Propietario != "GDGADM") %>%
     #Cómputo por grupo de referencia
     group_by(`Name / Id`, Designation) %>% 
     #Contar frecuencias en Maturity por grupos
@@ -81,5 +83,6 @@ pt1_planos <- raw_planos %>%
     dplyr::rename("DOCTECH_numero" = `Name / Id`) %>%
     #unión con planos_rta
     left_join(planos_rta, by = "DOCTECH_numero")
+
 ```
 

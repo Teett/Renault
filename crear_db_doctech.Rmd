@@ -24,7 +24,7 @@ library(tidyverse)
 library(data.table)
 library(lubridate)
 #Lectura de archivos
-raw_xjd <- fread("XJD.csv") %>% as_tibble()
+raw_xjd <- fread("XJD_S43.csv") %>% as_tibble()
 raw_lista <- fread("listado_consolidado.csv") %>% as_tibble()
 directorio <- raw_lista %>% 
   select(GFE = `Function Group`, DIRECTION = Department) %>% 
@@ -56,7 +56,7 @@ desarrollos_wide <- desarrollos %>%
   distinct(PIE_numero, .keep_all = TRUE) %>%
   ungroup() %>%
   spread(DOCTECH_type, DOCTECH_numero) %>% 
-  select(-`<NA>`, -"Doc. Bureautique")
+  select(-`<NA>`, -"Doc. Bureautique", -"Planche")
 
 glimpse(desarrollos_wide)
 ```
@@ -113,92 +113,15 @@ list(xx=as.name(documento))
 calcular_per_espec_ok("DEA-MM", "3D_ok")
 ```
 
-## Consolidación para comparación histórica - Nuevas filas
-
-```{r}
-# Inicialización
-historico <-   tibble(
-    date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7),
-    perc_mds_ok = calcular_porcentaje("MDS_ok"),
-    perc_2d_ok = calcular_porcentaje("2D_ok"),
-    perc_3d_ok = calcular_porcentaje("3D_ok"),
-    "DE-VB_mds" = calcular_per_espec_ok("DE-VB", "MDS_ok"), #Gustavo
-    "DE-VB_2d" = calcular_per_espec_ok("DE-VB", "2D_ok"), #Gustavo
-    "DE-VB_3d" = calcular_per_espec_ok("DE-VB", "3D_ok"), #Gustavo
-    "DE-VD_mds" = calcular_per_espec_ok("DE-VD", "MDS_ok"), #Jonathan
-    "DE-VD_2d" = calcular_per_espec_ok("DE-VD", "2D_ok"), #Jonathan
-    "DE-VD_3d" = calcular_per_espec_ok("DE-VD", "3D_ok"), #Jonathan
-    "DE-PB_mds" = calcular_per_espec_ok("DEA-PB", "MDS_ok"), #David
-    "DE-PB_2d" = calcular_per_espec_ok("DEA-PB", "2D_ok"), #David
-    "DE-PB_3d" = calcular_per_espec_ok("DEA-PB", "3D_ok"), #David
-    "DE-PE_mds" = calcular_per_espec_ok("DEA-PE", "MDS_ok"), #David
-    "DE-PE_2d" = calcular_per_espec_ok("DEA-PE", "2D_ok"), #David
-    "DE-PE_3d" = calcular_per_espec_ok("DEA-PE", "3D_ok"), #David
-    "DE-SC_mds" = calcular_per_espec_ok("DEA-SC", "MDS_ok"), #Ana
-    "DE-SC_2d" = calcular_per_espec_ok("DEA-SC", "2D_ok"), #Ana
-    "DE-SC_3d" = calcular_per_espec_ok("DEA-SC", "3D_ok"), #Ana
-    "DE-SI_mds" = calcular_per_espec_ok("DEA-SI", "MDS_ok"), #Walter Sellanes
-    "DE-SI_2d" = calcular_per_espec_ok("DEA-SI", "2D_ok"), #Walter Sellanes
-    "DE-SI_3d" = calcular_per_espec_ok("DEA-SI", "3D_ok"), #Walter Sellanes
-    "DE-SA_mds" = calcular_per_espec_ok("DEA-SA", "MDS_ok"), #Thiago Sato
-    "DE-SA_2d" = calcular_per_espec_ok("DEA-SA", "2D_ok"), #Thiago Sato
-    "DE-SA_3d" = calcular_per_espec_ok("DEA-SA", "3D_ok") #Thiago Sato
-  )
-
-historico[2:17, -1] <- NA
-```
-
-## Cálculo de porcentajes específicos
-
-```{r}
-nuevo <- historico %>% 
-  filter(date >= ymd("2019-10-16")) %>% 
-  mutate(perc_mds_ok = case_when(date == ymd("2019-10-16") ~  calcular_porcentaje("MDS_ok")),
-         perc_2d_ok = case_when(date == ymd("2019-10-16") ~  calcular_porcentaje("2D_ok")),
-         perc_3d_ok = case_when(date == ymd("2019-10-16") ~  calcular_porcentaje("3D_ok")),
-         "DE-VB_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VB", "MDS_ok")), #Gustavo
-         "DE-VB_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VB", "2D_ok")),#Gustavo
-         "DE-VB_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VB", "3D_ok")),#Gustavo
-         "DE-VD_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VD", "MDS_ok")), #Jonathan
-         "DE-VD_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VD", "2D_ok")),#Jonathan
-         "DE-VD_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DE-VD", "3D_ok")),#Jonathan
-         "DE-PB_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PB", "MDS_ok")), #David
-         "DE-PB_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PB", "2D_ok")), #David
-         "DE-PB_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PB", "3D_ok")), #David
-         "DE-PE_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PE", "MDS_ok")), #David
-         "DE-PE_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PE", "2D_ok")), #David
-         "DE-PE_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-PE", "3D_ok")), #David
-         "DE-SC_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SC", "MDS_ok")), #Ana
-         "DE-SC_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SC", "2D_ok")), #Ana
-         "DE-SC_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SC", "3D_ok")), #Ana
-         "DE-SI_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SI", "MDS_ok")), #Walter Sellanes
-         "DE-SI_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SI", "2D_ok")), #Walter Sellanes
-         "DE-SI_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SI", "3D_ok")), #Walter Sellanes
-         "DE-SA_mds" = case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SA", "MDS_ok")), #Thiago Sato
-         "DE-SA_2d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SA", "2D_ok")), #Thiago Sato
-         "DE-SA_3d" =  case_when(date == ymd("2019-10-16") ~ calcular_per_espec_ok("DEA-SA", "3D_ok"))#Thiago Sato
-         )
-```
-
-## Actualizar histórico - Cuidado: Realizar copia de seguridad
-
-```{r}
-historico <- historico %>% 
-  filter(!is.na(perc_mds_ok)) %>% 
-  bind_rows(nuevo)
-
-
-write_csv2(historico, "historico.csv")
-historico <- read_csv2("historico.csv")
-```
+La función `calcular_per_espec_ok` se puede utilizar para inicializar los valores de la trayectoria.
 
 ## Incorporación de la trayectoria global al historico
 
 Wide approach seems to work better with Tableau, not tidy enough?
 
 ```{r}
-wide_hist <- historico %>% 
-  mutate(expected_global_mds = seq(from = 0.667, to = 1, length.out = 17),
+wide_tray <- tibble(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7),
+    expected_global_mds = seq(from = 0.667, to = 1, length.out = 17),
     expected_global_2d = seq(from = 0.341, to = 1, length.out = 17),
     expected_global_3d = seq(from = 0.273, to = 1, length.out = 17),
     "expected_DE-VB_mds" = seq(from = 0.708, to = 1, length.out = 17),
@@ -230,49 +153,89 @@ wide_hist <- historico %>%
     "expected_DEA-SM_3d " = seq(from = 0.600, to = 1, length.out = 17),
     )
 
-write_csv2(wide_hist, "hist_tr_wide.csv")
+write_csv2(wide_tray, "hist_tr_wide.csv")
 ```
 
 ## Pivoting
 
 ```{r}
-long_hist <- read_csv2("long_hist.csv")
-wide_hist <- read_csv2("hist_tr_wide.csv")
+######## Important for the tidy approach, calculation of the indicator and setup,
 
+#Initialization
 
-long_hist <- wide_hist %>% 
-  pivot_longer(cols = starts_with("expected"),
-               names_to = "trayectorias",
-               values_to = "valor_trayectoria") %>%
-  pivot_longer(cols = starts_with("DE"),
-               names_to = "indicador",
-               values_to = "valor_real") %>% 
-  pivot_longer(cols = starts_with("perc"),
-               names_to = "global",
-               values_to = "valor_global")
-##Manipulation challenge
-long_hist %>%
-  extract(col = indicador,
-          into = c("div_ind", "doc_ind"),
-          regex = "(DE-VB|DE-VD|DE-PB|DE-PE|DE-SC|DE-SI|DE-SA)_(mds|2d|3d)") %>%
-  extract(
-    col = trayectorias,
-    into = c("tipo_tray", "div_tray", "doc_tray"),
-    regex = "(expected)_(DE-VB|DE-VD|DE-PB|DE-PE|DE-SC|DE-SI|DE-SA|global)_(mds|2d|3d)"
+# wide_current %>%
+# write_csv("historic_wide.csv")
+
+fecha <- "2019-10-23"
+
+wide_current <- desarrollos_final %>%
+  group_by(DIRECTION) %>%
+  summarize(
+    completion_mds = sum(MDS_ok == "OK") / sum(MDS_ok == "OK" |
+                                                 MDS_ok == "NOT OK"),
+    completion_2d = sum(`2D_ok` == "OK") / sum(`2D_ok` == "OK" |
+                                                 `2D_ok` == "NOT OK"),
+    completion_3d = sum(`3D_ok` == "OK") / sum(`3D_ok` == "OK" |
+                                                 `3D_ok` == "NOT OK")
   ) %>%
+  bind_rows(desarrollos_final %>% 
+  summarize(DIRECTION = "global",
+    completion_mds = sum(MDS_ok == "OK") / sum(MDS_ok == "OK" |
+                                                 MDS_ok == "NOT OK"),
+    completion_2d = sum(`2D_ok` == "OK") / sum(`2D_ok` == "OK" |
+                                                 `2D_ok` == "NOT OK"),
+    completion_3d = sum(`3D_ok` == "OK") / sum(`3D_ok` == "OK" |
+                                                 `3D_ok` == "NOT OK")
+  )) %>% 
+  pivot_longer(starts_with("completion"),
+               names_to = "tipo",
+               values_to = "valor") %>% 
+  spread(key = DIRECTION, value = valor) %>% 
+  mutate(tipo = str_remove(tipo, "completion_"),
+         date = as.Date(rep(fecha, 3))) %>% 
+  select(date, tipo, 3:12)
+
+#Updating # CUIDADO #
+
+historic_wide <- read_csv("historic_wide.csv")
+
+historic_wide <- historic_wide %>%
+  bind_rows(wide_current)
+
+#Writing historic # CUIDADO #
+
+historic_wide %>%
+  write_csv("historic_wide.csv")
+```
+
+# Añadiendo las trayectorias para las divisiones
+
+```{r}
+tray <- wide_tray %>% select(date, starts_with("expected")) %>% 
+  pivot_longer(starts_with("expected"),
+               names_to = "trayectoria", 
+               values_to = "tray") %>%
   extract(
-    col = global,
-    into = c("doc_glob"),
-    regex = "(mds|2d|3d)"
-  ) 
+    col = trayectoria,
+    into = c("division", "tipo"),
+    regex = "(DE-VB|DE-VD|DEA-PB|DEA-PE|DEA-SC|DEA-SI|DEA-SA|DEA-SM|DEA-MM|global)_(mds|2d|3d)"
+  )
+
+####### Tidy data frame for divisions
+tidy_divisions <- tibble(tipo = rep(c("mds", "2d", "3d"),17)) %>% 
+  group_by(tipo) %>% 
+  mutate(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7)) %>% 
+  left_join(historic_wide, by = c("tipo", "date")) %>%
+  pivot_longer(c(-tipo,-date), names_to = "division", values_to = "indicador") %>% 
+  left_join(tray, by = c("date", "division", "tipo")) %>%
+  filter(division != "DEA-SA") %>% 
+  mutate(estado = case_when(indicador >= tray ~ "OK",
+                            TRUE ~ "NOT OK"))
 
 
-#Data seems ok
-long_hist %>% 
-  ggplot(aes(date, valor_trayectoria, color = trayectorias)) +
-  geom_line()
-
-write_csv2(long_hist, "long_hist.csv")
+######### Objeto principal para Tableau
+tidy_divisions %>% 
+  write_csv2("tidy_divisions.csv")
 ```
 
 ## Cálculo agrupado por perímetro
@@ -292,49 +255,5 @@ por_perimetros <- desarrollos_final %>%
   pivot_longer(starts_with("completion"),
                names_to = "indicador",
                values_to = "valor")
-
-######## Important for the tidy approach, calculation of the indicator and setup, need to dinamize dates
-wide_current <- desarrollos_final %>%
-  group_by(DIRECTION) %>%
-  summarize(
-    completion_mds = sum(MDS_ok == "OK") / sum(MDS_ok == "OK" |
-                                                 MDS_ok == "NOT OK"),
-    completion_2d = sum(`2D_ok` == "OK") / sum(`2D_ok` == "OK" |
-                                                 `2D_ok` == "NOT OK"),
-    completion_3d = sum(`3D_ok` == "OK") / sum(`3D_ok` == "OK" |
-                                                 `3D_ok` == "NOT OK")
-  ) %>%
-  pivot_longer(starts_with("completion"),
-               names_to = "tipo",
-               values_to = "valor") %>% 
-  spread(key = DIRECTION, value = valor) %>% 
-  mutate(tipo = str_remove(tipo, "completion_"),
-         date = as.Date(c("2019-10-09", "2019-10-09", "2019-10-09")))
-
-
-```
-
-# Trying to add trajectories
-
-```{r}
-tray <- wide_hist %>% select(date, starts_with("expected")) %>% 
-  pivot_longer(starts_with("expected"),
-               names_to = "trayectoria", 
-               values_to = "tray") %>%
-  extract(
-    col = trayectoria,
-    into = c("division", "tipo"),
-    regex = "(DE-VB|DE-VD|DEA-PB|DEA-PE|DEA-SC|DEA-SI|DEA-SA|DEA-SM|DEA-MM)_(mds|2d|3d)"
-  )
-
-########### Best approach so far to a tidy frame  
-tibble(tipo = rep(c("mds", "2d", "3d"),17)) %>% 
-  group_by(tipo) %>% 
-  mutate(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7)) %>% 
-  left_join(wide_current, by = c("tipo", "date")) %>%
-  pivot_longer(c(-tipo,-date), names_to = "division", values_to = "indicador") %>% 
-  left_join(tray, by = c("date", "division", "tipo")) %>%
-  filter(!is.na(tray)) %>% view()
-
 ```
 

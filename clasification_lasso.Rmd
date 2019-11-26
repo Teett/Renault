@@ -1,0 +1,193 @@
+---
+title: "Clasificación doctech"
+author: "Luis Daniel Chavarría"
+date: "20/11/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Clasificación de causas de rechazo de documentos técnicos
+
+El objetivo de este trabajo es clasificar los planos de acuerdo a sus motivos de rechazo en 3 categorías: 
+
+- Forma: El plano tiene errores en la distribución, cajetines, faltas en símbolos, entre otros.
+- Rigor técnico: El plano tiene errores técnicos graves o faltas de especificaciones, por lo que debe ser revisado a profundidad.
+- Procedimiento: El plano fue enviado a circuito de firmas de manera incorrecta, por ejemplo, cuando no se citan los pool de firmantes necesarios o cuando se cita a un validador que no está capacitado para hacerlo.
+
+## El método
+
+Julia Silge en su [viñeta](https://www.r-bloggers.com/text-classification-with-tidy-data-principles/) propone el modelo de regresión  con regularización LASSO para la clasificación basada en palabras y obtienen resultados muy interesantes realizando clasificaciones adecuadas para dos libros: La guerra de los mundos vs Orgullo y prejuicio.
+
+# Librerías
+
+```{r}
+library(tidyverse)
+library(glmnet)
+library(tidytext)
+library(data.table)
+library(rsample)
+
+raw_verbatim <- fread("consolidado_ph2.csv") %>% as_tibble()
+planos <- fread("planos_pt2.csv", encoding = "UTF-8") %>% as_tibble() %>% 
+  mutate(PIE_numero = str_trim(PIE_numero))
+```
+
+# Data cleaning
+
+```{r}
+clean_verbatim <- raw_verbatim %>% 
+  filter(Maturity == "Refused") %>% 
+  inner_join(planos, by = c("Name/Id" = "DOCTECH_numero")) %>% 
+  mutate(Comentarios = str_trim(Comentarios))
+```
+
+# Stratified Sampling
+
+¿Cuáles perímetros están menos representados? 
+
+```{r}
+clean_verbatim %>% 
+  count(ELTDEC_numero, sort = T) %>% 
+  mutate(ELTDEC_numero = as_factor(ELTDEC_numero)) %>% 
+  ggplot(aes(x = ELTDEC_numero, y = n)) +
+  geom_col() +
+  scale_y_log10()
+```
+
+Los perímetros B4, B1, 55, 56 Y 94 cuentan con menos de 10 observaciones. Se excluirán para el muestreo aleatorio y se agregarán posteriormente con su total de observaciones.
+
+```{r}
+set.seed(1)
+rare_eltdec <- clean_verbatim %>% 
+  filter(ELTDEC_numero == "B4" | ELTDEC_numero == "B1" | ELTDEC_numero == "55" | ELTDEC_numero == "56" | ELTDEC_numero == "94")
+
+
+muestra <- clean_verbatim %>% 
+  anti_join(rare_eltdec, by = "Name/Id") %>%
+  filter(Comentarios != "") %>%
+  group_by(ELTDEC_numero) %>% 
+  sample_n(size = 15) %>%
+  ungroup() %>% 
+  bind_rows(rare_eltdec)
+
+# write_excel_csv2(muestra, "muestra.csv")
+```
+
+```{r}
+global_train_set <- fread("global_train_set.csv") %>% as_tibble() %>% 
+  rownames_to_column()
+```
+
+
+# Modelling
+
+```{r}
+tidy_words <- global_train_set %>% 
+  select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
+         ELTDEC_designation, FCT_numero, FCT_designation, 
+         ESO_num_PG, ESO_designation_PG, PIE_numero, 
+         PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>% 
+  mutate(Comentarios = str_replace_all(Comentarios, "\n", " ")) %>% 
+  unnest_tokens(word, Comentarios) %>%
+  group_by(word) %>% 
+  filter(n() > 10) %>% 
+  ungroup()
+```
+
+
+```{r}
+words_frequency <- tidy_words %>%
+  filter(causa_rechazo != "") %>% 
+  count(causa_rechazo, word, sort = T) %>% 
+  anti_join(get_stopwords(language = "en"), by = "word") %>% 
+  anti_join(get_stopwords(language = "fr"), by = "word") %>% 
+  anti_join(get_stopwords(language = "pt"), by = "word") %>% 
+  anti_join(get_stopwords(language = "es"), by = "word")
+
+words_frequency %>%
+  filter(n > 1) %>% 
+  ggplot(aes(reorder_within(word, n, causa_rechazo), n, fill = causa_rechazo)) +
+  geom_col(alpha = 0.8, show.legend = FALSE) +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(~causa_rechazo, scales = "free") + 
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(x = NULL, y = "Palabras", title = "Palabras más comunes después de remover stop words")
+
+ggsave("frequency.png", units = "mm", width = 215, height = 279)
+```
+
+# Testing and training data split
+
+```{r}
+word_split <- global_train_set %>%
+  filter(causa_rechazo != "") %>% 
+  select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
+         ELTDEC_designation, FCT_numero, FCT_designation, 
+         ESO_num_PG, ESO_designation_PG, PIE_numero, 
+         PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>%
+  initial_split()
+
+train_data <- training(word_split)
+test_data <- testing(word_split)
+```
+
+# Transforming data to a sparse matrix to use on the machine learning algorithm
+
+```{r}
+sparse_words <- tidy_words %>%
+  filter(causa_rechazo != "") %>% 
+  count(rowname, word) %>%
+  inner_join(train_data, by = "rowname") %>%
+  cast_sparse(rowname, word, n)
+```
+
+One reason this overall approach is flexible and wonderful is that you could at this point cbind() other columns, such as non-text numeric data, onto this sparse matrix. Then you can use this combination of text and non-text data as your predictors in the machine learning algorithm, and the regularized regression algorithm we are going to use will find which are important for your problem space. I’ve experienced great results with my real world prediction problems using this approach.- Julia Silge
+
+```{r}
+word_rownames <- as.integer(rownames(sparse_words))
+
+words_joined <- tibble(rowname = as.character(word_rownames)) %>%
+  left_join(global_train_set %>%
+              mutate(rowname = rowname) %>% 
+    select(rowname, causa_rechazo))
+```
+
+# Training the model and using the processor
+
+```{r}
+
+is_forma <- words_joined$causa_rechazo == "forma"
+model <- cv.glmnet(sparse_words, is_forma,
+  family = "binomial",
+  keep = TRUE
+)
+
+plot(model$glmnet.fit)
+plot(model)
+```
+
+# Digging into the coefficients
+
+```{r}
+library(broom)
+
+coefs <- model$glmnet.fit %>%
+  tidy() %>%
+  filter(lambda == model$lambda.1se)
+
+coefs %>%
+  group_by(estimate > 0) %>%
+  top_n(10, abs(estimate)) %>%
+  ungroup() %>%
+  ggplot(aes(fct_reorder(term, estimate), estimate, fill = estimate > 0)) +
+  geom_col(alpha = 0.8, show.legend = FALSE) +
+  coord_flip()
+```
+
+

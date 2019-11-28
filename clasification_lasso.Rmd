@@ -31,6 +31,7 @@ library(glmnet)
 library(tidytext)
 library(data.table)
 library(rsample)
+library(yardstick)
 
 raw_verbatim <- fread("consolidado_ph2.csv") %>% as_tibble()
 planos <- fread("planos_pt2.csv", encoding = "UTF-8") %>% as_tibble() %>% 
@@ -145,6 +146,8 @@ sparse_words <- tidy_words %>%
   count(rowname, word) %>%
   inner_join(train_data, by = "rowname") %>%
   cast_sparse(rowname, word, n)
+
+dim(sparse_words)
 ```
 
 One reason this overall approach is flexible and wonderful is that you could at this point cbind() other columns, such as non-text numeric data, onto this sparse matrix. Then you can use this combination of text and non-text data as your predictors in the machine learning algorithm, and the regularized regression algorithm we are going to use will find which are important for your problem space. I’ve experienced great results with my real world prediction problems using this approach.- Julia Silge
@@ -160,16 +163,18 @@ words_joined <- tibble(rowname = as.character(word_rownames)) %>%
 
 # Training the model and using the processor
 
-```{r}
+This part has some real creativity, because all the examples have only binomial classification. Let's see.
 
-is_forma <- words_joined$causa_rechazo == "forma"
-model <- cv.glmnet(sparse_words, is_forma,
-  family = "binomial",
+```{r}
+response <- words_joined$causa_rechazo
+
+words_model <- cv.glmnet(sparse_words, response,
+  family = "multinomial",
   keep = TRUE
 )
 
-plot(model$glmnet.fit)
-plot(model)
+plot(words_model$glmnet.fit)
+plot(words_model)
 ```
 
 # Digging into the coefficients
@@ -177,17 +182,71 @@ plot(model)
 ```{r}
 library(broom)
 
-coefs <- model$glmnet.fit %>%
+coefs <- words_model$glmnet.fit %>%
   tidy() %>%
-  filter(lambda == model$lambda.1se)
+  filter(lambda == words_model$lambda.1se)
+
+
 
 coefs %>%
   group_by(estimate > 0) %>%
-  top_n(10, abs(estimate)) %>%
   ungroup() %>%
-  ggplot(aes(fct_reorder(term, estimate), estimate, fill = estimate > 0)) +
-  geom_col(alpha = 0.8, show.legend = FALSE) +
+  ggplot(aes(fct_reorder(term, estimate), estimate, fill = class)) +
+  geom_col(alpha = 0.8) +
   coord_flip()
+
+ggsave("coefs.png", units = "mm", width = 215, height = 100)
 ```
 
+# Test set trial
+
+```{r}
+test_data <- tidy_words %>%
+  filter(causa_rechazo != "") %>% 
+  count(rowname, word) %>%
+  inner_join(test_data, by = "rowname") %>%
+  cast_sparse(rowname, word, n)
+
+predict(words_model, new_data = test_data)
+```
+
+
+```{r}
+intercept <- coefs %>%
+  filter(term == "(Intercept)") %>%
+  pull(estimate)
+
+classifications <- tidy_words %>%
+  inner_join(test_data) %>%
+  inner_join(coefs, by = c("word" = "term")) %>%
+  group_by(rowname) %>%
+  summarize(score = sum(estimate)) %>%
+  mutate(probability = plogis(score))
+```
+
+Does this apply to a multinomial model?
+
+```{r}
+comment_classes <- classifications %>%
+  left_join(train_data %>%
+    select(causa_rechazo, rowname), by = "rowname") %>%
+  mutate(causa_rechazo = as.factor(causa_rechazo))
+
+comment_classes %>%
+  roc_curve(title, probability) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(
+    color = "midnightblue",
+    size = 1.5
+  ) +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  ) +
+  labs(
+    title = "ROC curve for text classification using regularized regression",
+    subtitle = "Predicting whether text was written by Jane Austen or H.G. Wells"
+  )
+```
 

@@ -108,10 +108,13 @@ words_frequency <- tidy_words %>%
   anti_join(get_stopwords(language = "en"), by = "word") %>% 
   anti_join(get_stopwords(language = "fr"), by = "word") %>% 
   anti_join(get_stopwords(language = "pt"), by = "word") %>% 
-  anti_join(get_stopwords(language = "es"), by = "word")
+  anti_join(get_stopwords(language = "es"), by = "word") %>% 
+  filter(word != "ok")
 
 words_frequency %>%
-  filter(n > 1) %>% 
+  group_by(causa_rechazo) %>%
+  top_n(40) %>%
+  ungroup() %>%
   ggplot(aes(reorder_within(word, n, causa_rechazo), n, fill = causa_rechazo)) +
   geom_col(alpha = 0.8, show.legend = FALSE) +
   scale_x_reordered() +
@@ -130,7 +133,8 @@ word_split <- global_train_set %>%
   filter(causa_rechazo != "") %>% 
   select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
          ELTDEC_designation, FCT_numero, FCT_designation, 
-         ESO_num_PG, ESO_designation_PG, PIE_numero, 
+
+                  ESO_num_PG, ESO_designation_PG, PIE_numero, 
          PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>%
   initial_split()
 
@@ -142,12 +146,27 @@ test_data <- testing(word_split)
 
 ```{r}
 sparse_words <- tidy_words %>%
-  filter(causa_rechazo != "") %>% 
+  filter(causa_rechazo != "", word != "") %>%
   count(rowname, word) %>%
+  anti_join(get_stopwords(language = "en"), by = "word") %>% 
+  anti_join(get_stopwords(language = "fr"), by = "word") %>% 
+  anti_join(get_stopwords(language = "pt"), by = "word") %>% 
+  anti_join(get_stopwords(language = "es"), by = "word") %>% 
   inner_join(train_data, by = "rowname") %>%
   cast_sparse(rowname, word, n)
 
+sparse_words_test <- tidy_words %>%
+  filter(causa_rechazo != "", word != "") %>%
+  count(rowname, word) %>%
+  anti_join(get_stopwords(language = "en"), by = "word") %>% 
+  anti_join(get_stopwords(language = "fr"), by = "word") %>% 
+  anti_join(get_stopwords(language = "pt"), by = "word") %>% 
+  anti_join(get_stopwords(language = "es"), by = "word") %>% 
+  inner_join(test_data, by = "rowname") %>%
+  cast_sparse(rowname, word, n)
+
 dim(sparse_words)
+dim(sparse_words_test)
 ```
 
 One reason this overall approach is flexible and wonderful is that you could at this point cbind() other columns, such as non-text numeric data, onto this sparse matrix. Then you can use this combination of text and non-text data as your predictors in the machine learning algorithm, and the regularized regression algorithm we are going to use will find which are important for your problem space. I’ve experienced great results with my real world prediction problems using this approach.- Julia Silge
@@ -157,7 +176,6 @@ word_rownames <- as.integer(rownames(sparse_words))
 
 words_joined <- tibble(rowname = as.character(word_rownames)) %>%
   left_join(global_train_set %>%
-              mutate(rowname = rowname) %>% 
     select(rowname, causa_rechazo))
 ```
 
@@ -189,11 +207,11 @@ coefs <- words_model$glmnet.fit %>%
 
 
 coefs %>%
-  group_by(estimate > 0) %>%
-  ungroup() %>%
   ggplot(aes(fct_reorder(term, estimate), estimate, fill = class)) +
-  geom_col(alpha = 0.8) +
-  coord_flip()
+  geom_col(alpha = 0.8, position = position_dodge2()) +
+  coord_flip() +
+  facet_wrap(~class, scales = "free")
+
 
 ggsave("coefs.png", units = "mm", width = 215, height = 100)
 ```
@@ -207,7 +225,8 @@ test_data <- tidy_words %>%
   inner_join(test_data, by = "rowname") %>%
   cast_sparse(rowname, word, n)
 
-predict(words_model, new_data = test_data)
+predict(words_model, newx = sparse_words_test, type = "response")
+predict(words_model, newx = sparse_words_test, s = "lambda.min", type = "class")
 ```
 
 

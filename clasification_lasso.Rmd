@@ -96,8 +96,8 @@ tidy_words <- global_train_set %>%
          PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>% 
   mutate(Comentarios = str_replace_all(Comentarios, "\n", " ")) %>% 
   unnest_tokens(word, Comentarios) %>%
-  group_by(word) %>% 
-  filter(n() > 10) %>% 
+  group_by(word) %>%
+  filter(n() >= 5) %>%  
   ungroup()
 ```
 
@@ -109,7 +109,7 @@ words_frequency <- tidy_words %>%
   anti_join(get_stopwords(language = "en"), by = "word") %>% 
   anti_join(get_stopwords(language = "fr"), by = "word") %>% 
   anti_join(get_stopwords(language = "pt"), by = "word") %>% 
-  anti_join(get_stopwords(language = "es"), by = "word") %>% 
+  anti_join(get_stopwords(language = "es"), by = "word") %>%
   filter(word != "ok")
 
 words_frequency %>%
@@ -124,7 +124,7 @@ words_frequency %>%
   scale_y_continuous(expand = c(0, 0)) +
   labs(x = NULL, y = "Palabras", title = "Palabras más comunes después de remover stop words")
 
-ggsave("frequency.png", units = "mm", width = 215, height = 279)
+# ggsave("frequency.png", units = "mm", width = 215, height = 279)
 ```
 
 # Testing and training data split
@@ -147,7 +147,6 @@ test_data <- testing(word_split)
 
 ```{r}
 sparse_words <- tidy_words %>%
-  filter(causa_rechazo != "", word != "") %>%
   count(rowname, word) %>%
   anti_join(get_stopwords(language = "en"), by = "word") %>% 
   anti_join(get_stopwords(language = "fr"), by = "word") %>% 
@@ -156,18 +155,9 @@ sparse_words <- tidy_words %>%
   inner_join(train_data, by = "rowname") %>%
   cast_sparse(rowname, word, n)
 
-sparse_words_test <- tidy_words %>%
-  filter(causa_rechazo != "", word != "") %>%
-  count(rowname, word) %>%
-  anti_join(get_stopwords(language = "en"), by = "word") %>% 
-  anti_join(get_stopwords(language = "fr"), by = "word") %>% 
-  anti_join(get_stopwords(language = "pt"), by = "word") %>% 
-  anti_join(get_stopwords(language = "es"), by = "word") %>% 
-  inner_join(test_data, by = "rowname") %>%
-  cast_sparse(rowname, word, n)
-
 dim(sparse_words)
-dim(sparse_words_test)
+
+
 ```
 
 One reason this overall approach is flexible and wonderful is that you could at this point cbind() other columns, such as non-text numeric data, onto this sparse matrix. Then you can use this combination of text and non-text data as your predictors in the machine learning algorithm, and the regularized regression algorithm we are going to use will find which are important for your problem space. I’ve experienced great results with my real world prediction problems using this approach.- Julia Silge
@@ -210,7 +200,11 @@ coefs %>%
   ggplot(aes(fct_reorder(term, estimate), estimate, fill = class)) +
   geom_col(alpha = 0.8, position = position_dodge2()) +
   coord_flip() +
-  facet_wrap(~class, scales = "free")
+  facet_wrap(~class, scales = "free") +
+  labs(x = "Coeficientes",
+       y = "Estimaciones",
+       title = "Palabras que contribuyen a que un comentario sea de una categoría",
+       subtitle = "Elastic-Net Model")
 
 
 ggsave("coefs.png", units = "mm", width = 215, height = 100)
@@ -224,6 +218,7 @@ No es correcto utilizar la función predict para este tipo de casos en predicci�
 # predict(words_model, newx = sparse_words_test, s = "lambda.min", type = "class")
 # ```
 
+Do I need an intercept? I don't have it anyway.
 
 ```{r}
 # intercept <- coefs %>%
@@ -240,10 +235,6 @@ classifications <- tidy_words %>%
             response = class[which(probability == max(probability))]) %>% 
   ungroup()
 
-classifications %>% 
-  ggplot(aes(x = `Name/Id`, y = prob, fill = response)) +
-  geom_col() +
-  coord_flip()
 ```
 
 This would be the highest likelihood classification obtained for the model, given that a single response is needed.
@@ -251,12 +242,14 @@ This would be the highest likelihood classification obtained for the model, give
 
 # From Julia's text
 
+Joining the classifications with the training set
+
 ```{r}
 train_validation <- classifications %>%
   left_join(global_train_set %>%
     select(causa_rechazo, rowname), by = "rowname") %>%
-  mutate(causa_rechazo = fct_infreq((as_factor(causa_rechazo))) ,
-         response = fct_infreq(as_factor(response)))
+  mutate(causa_rechazo = fct_relevel((as_factor(causa_rechazo)), "técnico", "forma", "procedimiento"),
+         response = fct_relevel((as_factor(response)), "técnico", "forma", "procedimiento"))
 ```
 
 # Matriz de confusión y validación
@@ -264,25 +257,19 @@ train_validation <- classifications %>%
 
 
 ```{r}
-train_validation %>% 
+confusion <- train_validation %>% 
   conf_mat(causa_rechazo, response)
 
-# train_validation %>%
-#   roc_curve(causa_rechazo, prob) %>%
-#   ggplot(aes(x = 1 - specificity, y = sensitivity)) +
-#   geom_line(
-#     color = "midnightblue",
-#     size = 1.5
-#   ) +
-#   geom_abline(
-#     lty = 2, alpha = 0.5,
-#     color = "gray50",
-#     size = 1.2
-#   ) +
-#   labs(
-#     title = "ROC curve for text classification using regularized regression",
-#     subtitle = "Predicting whether text was written by Jane Austen or H.G. Wells"
-#   )
+accuracy <- (confusion[[1]][1] + confusion[[1]][5] + confusion[[1]][9]) / sum(unlist(confusion))
+confusion
+accuracy
 ```
 
-60% Accuracy (TP + TN) / Total is quite a good measure for a first try.
+60% Accuracy (TP + TN) / Total is quite a good measure for a first try. Let's now use the model on the real data. `global_train_set.csv` is a stratified sample from `clean_verbatim`. Will model performance improve if it is trained with the entire train data? Likely yes, so let's do it!
+
+Results seem a little bit overfit by looking at the coefficients, but that can be handled. A big question is wheter a comment may not have any words of the ones specified in the coefficients.
+
+```{r}
+
+```
+

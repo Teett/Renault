@@ -30,6 +30,7 @@ directorio <- raw_lista %>%
   select(GFE = `Function Group`, DIRECTION = Department) %>% 
   distinct() %>% 
   arrange(GFE)
+profia <- readLines("profia.txt")
 ```
 
 ## Seleccionemos únicamente las referencias en la lista de desarrollos
@@ -39,7 +40,7 @@ Tendremos en consideración además únicamente las variables que nos interesan
 ```{r}
 desarrollos <- raw_xjd %>%
   mutate(PIE_numero = str_trim(PIE_numero)) %>% #Eliminar espacio en blanco
-  filter(PIE_numero %in% raw_lista$PartReference) %>% #Seleccionar las referencias en la lista
+  filter(PIE_numero %in% profia) %>% #Seleccionar las referencias en la lista
   dplyr::select(ELTDEC_numero:FCT_numero, FCT_designation, ESO_num_PG, ESO_designation_PG, PIE_numero:PIE_designation, PIE_gest_MDS, PIEIND_indice = PIEIND_Dernier_indice, PIEIND_typologie, DOCTECH_numero, DOCTECH_type, VARCAS_MTC) %>%
   na_if("")
 
@@ -56,7 +57,7 @@ desarrollos_wide <- desarrollos %>%
   distinct(PIE_numero, .keep_all = TRUE) %>%
   ungroup() %>%
   spread(DOCTECH_type, DOCTECH_numero) %>% 
-  select(-`<NA>`, -"Doc. Bureautique", -"Planche")
+  select(-`<NA>`, -"Doc. Bureautique")
 
 glimpse(desarrollos_wide)
 ```
@@ -82,16 +83,14 @@ desarrollos_final <- desarrollos_wide %>%
       PIE_gest_MDS == "Non" ~ "NO APLICA",
       TRUE ~ "NOT OK")
   ) %>% 
-  left_join(raw_lista, by = c("PIE_numero" = "PartReference")) %>%
   left_join(directorio, by = c("ELTDEC_numero" = "GFE")) %>% 
-  dplyr::select(TIPO, DIRECTION, 1:19) %>%
+  dplyr::select(1:19) %>%
   replace(is.na(.), "-") %>% 
   mutate(FCT_numero = str_remove(FCT_numero, "---"),
          perimetro = paste(ELTDEC_numero, "-", ELTDEC_designation))
   
 glimpse(desarrollos_final)
-
-# write_excel_csv2(desarrollos_final, "desarrollos_final.csv")
+write_excel_csv2(desarrollos_final, "doctech_final_profia.csv")
 ```
 
 ## Creación de funciones para calcular porcentajes
@@ -113,14 +112,26 @@ list(xx=as.name(documento))
       )
 }
 
+#Porcentaje perímetros
+calcular_perimetros <- function(perimetro, documento) {
+  eval(
+    substitute(
+(desarrollos_final %>% filter(ELTDEC_numero == perimetro & xx == "OK") %>% count() %>% as.numeric()) / 
+(desarrollos_final %>% filter(ELTDEC_numero == perimetro & xx != "NO APLICA") %>% count() %>% as.numeric()),
+list(xx=as.name(documento))
+              )
+      )
+}
+
 calcular_per_espec_ok("DEA-MM", "3D_ok")
+calcular_perimetros("11", "3D_ok")
 ```
 
 La función `calcular_per_espec_ok` se puede utilizar para inicializar los valores de la trayectoria.
 
 ## Incorporación de la trayectoria global al historico
 
-Added Tech debt by not automatizing the `from` argument in the trajectories. 
+Wide approach seems to work better with Tableau, not tidy enough?
 
 ```{r}
 wide_tray <- tibble(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7),
@@ -242,6 +253,63 @@ tidy_divisions <- tibble(tipo = rep(c("mds", "2d", "3d"),17)) %>%
 ######### Objeto principal para Tableau
 tidy_divisions %>% 
   write_csv2("tidy_divisions.csv")
+```
+
+## Cálculo agrupado por perímetro
+
+38 perímetros que necesitan trayectorias individuales
+
+```{r}
+
+por_perimetros_wide <- desarrollos_final %>%
+  group_by(ELTDEC_numero, DIRECTION) %>%
+  summarize(
+    completion_mds = sum(MDS_ok == "OK") / sum(MDS_ok == "OK" |
+                                                 MDS_ok == "NOT OK"),
+    completion_2d = sum(`2D_ok` == "OK") / sum(`2D_ok` == "OK" |
+                                                 `2D_ok` == "NOT OK"),
+    completion_3d = sum(`3D_ok` == "OK") / sum(`3D_ok` == "OK" |
+                                                 `3D_ok` == "NOT OK")
+  )
+
+tidy_perimetros <- por_perimetros_wide %>% 
+  pivot_longer(starts_with("completion"),
+               names_to = "indicador",
+               values_to = "valor")
+```
+
+
+```{r}
+calcular_perimetros("11", "3D_ok")
+
+tibble(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7),
+       tray_11_mds = seq(from = calcular_perimetros("11", "MDS_ok"), to = 1, length.out = 17),
+       tray_11_2d = seq(from = calcular_perimetros("11", "2D_ok"), to = 1, length.out = 17),
+       tray_11_3d = seq(from = calcular_perimetros("11", "3D_ok"), to = 1, length.out = 17),
+       tray_12_mds = seq(from = calcular_perimetros("12", "MDS_ok"), to = 1, length.out = 17))
+```
+
+Tocaría hacerlo 114 veces, impráctico, buscar un loop?
+
+```{r}
+trays <- tibble(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-30"), by = 7))
+
+for (i in as.numeric(por_perimetros_wide$ELTDEC_numero[1:31])) {
+  output <- trays %>% 
+    mutate(assign(paste0("tray_",i,"_", "mds"), seq(from = calcular_perimetros(i, "MDS_ok"), to = 1, length.out = 17)))
+}
+
+calcular_perimetros("11", "MDS_ok")
+
+for (i in as.numeric(por_perimetros_wide$ELTDEC_numero[1:31])) {
+  print(i)
+}
+
+assign(paste0("tray_",11,"_", "mds"), seq(from = calcular_perimetros(11, "MDS_ok"), to = 1, length.out = 17))
+
+trays %>% 
+    mutate(assign(paste0("tray_",i,"_", "mds"), seq(from = calcular_perimetros(i, "MDS_ok"), to = 1, length.out = 17)))
+
 ```
 
 ## Uniendo database de riesgo a este script

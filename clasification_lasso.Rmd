@@ -393,3 +393,21 @@ final_validation <- final_classifications %>%
 
 write_excel_csv2(final_validation, "final_validation.csv")
 ```
+
+## Need to join this data to the risk assessment database
+
+```{r}
+riesgo_planos <- fread("riesgo_planos_xjd.csv", encoding = "UTF-8") %>% as_tibble()
+final_validation <- fread("final_validation.csv", encoding = "UTF-8") %>% as_tibble()
+desarrollos_final <- fread("desarrollos_final.csv", encoding = "UTF-8") %>% as_tibble()
+
+riesgo_planos %>% 
+  left_join(final_validation, by = c("DOCTECH_numero" = "Name/Id")) %>%
+  write_csv2("riesgo_planos_xjd.csv")
+
+desarrollos_final %>%
+  semi_join(riesgo_planos, by = "FCT_numero") %>% 
+  write_csv2("riesgo_funciones_xjd.csv")
+```
+
+

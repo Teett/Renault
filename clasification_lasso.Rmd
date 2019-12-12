@@ -238,7 +238,6 @@ classifications <- tidy_words %>%
 
 This would be the highest likelihood classification obtained for the model, given that a single response is needed.
 
-
 # From Julia's text
 
 Joining the classifications with the training set
@@ -270,7 +269,93 @@ Results seem a little bit overfit by looking at the coefficients, but that can b
 
 # Evaluación y aplicación del modelo en los datos generales
 
-Missing the training on the complete data
+Missing the training on the complete data. Let's overfit the model! Creating the objects needed to run the model
+
+```{r}
+final_train <- global_train_set %>%
+  filter(causa_rechazo != "") %>% 
+  select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
+         ELTDEC_designation, FCT_numero, FCT_designation, 
+         ESO_num_PG, ESO_designation_PG, PIE_numero, 
+         PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo)
+
+final_sparse_words <- tidy_words %>%
+  count(rowname, word) %>%
+  anti_join(get_stopwords(language = "en"), by = "word") %>% 
+  anti_join(get_stopwords(language = "fr"), by = "word") %>% 
+  anti_join(get_stopwords(language = "pt"), by = "word") %>% 
+  anti_join(get_stopwords(language = "es"), by = "word") %>% 
+  cast_sparse(rowname, word, n)
+
+dim(final_sparse_words)
+
+final_word_rownames <- as.integer(rownames(final_sparse_words))
+
+final_words_joined <- tibble(rowname = as.character(final_word_rownames)) %>%
+  left_join(global_train_set %>%
+    select(rowname, causa_rechazo))
+
+final_response <- final_words_joined$causa_rechazo %>% as_factor()
+```
+
+
+```{r}
+final_words_model <- cv.glmnet(final_sparse_words, final_response,
+  family = "multinomial",
+  keep = TRUE
+)
+
+plot(final_words_model$glmnet.fit)
+plot(final_words_model)
+
+final_coefs <- final_words_model$glmnet.fit %>%
+  tidy() %>%
+  filter(lambda == final_words_model$lambda.1se)
+
+
+
+final_coefs %>%
+  ggplot(aes(fct_reorder(term, estimate), estimate, fill = class)) +
+  geom_col(alpha = 0.8, position = position_dodge2()) +
+  coord_flip() +
+  facet_wrap(~class, scales = "free") +
+  labs(x = "Coeficientes",
+       y = "Estimaciones",
+       title = "Palabras que contribuyen a que un comentario sea de una categoría",
+       subtitle = "Elastic-Net Model - Overfit version")
+
+
+# ggsave("final_coefs.png", units = "mm", width = 215, height = 250)
+
+final_classifications <- tidy_words %>%
+  inner_join(global_train_set) %>%
+  inner_join(final_coefs, by = c("word" = "term")) %>%
+  group_by(rowname, `Name/Id`, class) %>%
+  summarize(score = sum(estimate)) %>%
+  mutate(probability = plogis(score)) %>% 
+  summarize(prob = max(probability), 
+            response = class[which(probability == max(probability))]) %>% 
+  ungroup()
+
+final_validation <- final_classifications %>%
+  left_join(global_train_set %>%
+    select(causa_rechazo, rowname), by = "rowname") %>%
+  mutate(causa_rechazo = fct_relevel((as_factor(causa_rechazo)), "técnico", "forma", "procedimiento"),
+         response = fct_relevel((as_factor(response)), "técnico", "forma", "procedimiento"))
+```
+
+# Matriz de confusión y validación del modelo sobreajustado
+
+```{r}
+final_confusion <- final_validation %>% 
+  conf_mat(causa_rechazo, response)
+
+final_accuracy <- (final_confusion[[1]][1] + final_confusion[[1]][5] + final_confusion[[1]][9]) / sum(unlist(final_confusion))
+final_confusion
+final_accuracy
+```
+
+The overfit model performed with a positive detection rate of 74.61% on the first try, therefore, the overfit model will be assumed as a better option to classify the out-of-sample observations because of a overall higher train data.
 
 ```{r}
 tidy_final <- clean_verbatim %>% 
@@ -289,7 +374,7 @@ tidy_final <- clean_verbatim %>%
 
 ```{r}
 final_classifications <- tidy_final %>%
-  inner_join(coefs, by = c("word" = "term")) %>%
+  inner_join(final_coefs, by = c("word" = "term")) %>%
   group_by(rowname, `Name/Id`, class) %>%
   summarize(score = sum(estimate)) %>%
   mutate(probability = plogis(score)) %>% 
@@ -303,9 +388,8 @@ final_classifications <- tidy_final %>%
 final_validation <- final_classifications %>%
   left_join(clean_verbatim %>%
     select(causa_rechazo, rowname), by = "rowname") %>%
-  mutate(response = fct_relevel((as_factor(response)), "técnico", "forma", "procedimiento"))
+  mutate(response = fct_relevel((as_factor(response)), "técnico", "forma", "procedimiento")) %>% 
+  select(-causa_rechazo)
 
 write_excel_csv2(final_validation, "final_validation.csv")
 ```
-
-

@@ -45,7 +45,9 @@ planos <- fread("planos_pt2.csv", encoding = "UTF-8") %>% as_tibble() %>%
 clean_verbatim <- raw_verbatim %>% 
   filter(Maturity == "Refused") %>% 
   inner_join(planos, by = c("Name/Id" = "DOCTECH_numero")) %>% 
-  mutate(Comentarios = str_trim(Comentarios))
+  mutate(Comentarios = str_trim(Comentarios),
+         causa_rechazo = NA) %>% 
+  rownames_to_column()
 ```
 
 # Stratified Sampling
@@ -64,7 +66,7 @@ clean_verbatim %>%
 Los perímetros B4, B1, 55, 56 Y 94 cuentan con menos de 10 observaciones. Se excluirán para el muestreo aleatorio y se agregarán posteriormente con su total de observaciones.
 
 ```{r}
-set.seed(1)
+et.seed(1)
 rare_eltdec <- clean_verbatim %>% 
   filter(ELTDEC_numero == "B4" | ELTDEC_numero == "B1" | ELTDEC_numero == "55" | ELTDEC_numero == "56" | ELTDEC_numero == "94")
 
@@ -77,12 +79,11 @@ muestra <- clean_verbatim %>%
   ungroup() %>% 
   bind_rows(rare_eltdec)
 
-# write_excel_csv2(muestra, "muestra.csv")
+write_excel_csv2(muestra, "global_train_set.csv")
 ```
 
 ```{r}
-global_train_set <- fread("global_train_set.csv") %>% as_tibble() %>% 
-  rownames_to_column()
+global_train_set <- fread("global_train_set.csv", encoding = "UTF-8") %>% as_tibble() %>% mutate(rowname = as.character(rowname))
 ```
 
 
@@ -130,12 +131,12 @@ words_frequency %>%
 # Testing and training data split
 
 ```{r}
+set.seed(1995)
 word_split <- global_train_set %>%
   filter(causa_rechazo != "") %>% 
   select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
          ELTDEC_designation, FCT_numero, FCT_designation, 
-
-                  ESO_num_PG, ESO_designation_PG, PIE_numero, 
+         ESO_num_PG, ESO_designation_PG, PIE_numero, 
          PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>%
   initial_split()
 
@@ -156,8 +157,6 @@ sparse_words <- tidy_words %>%
   cast_sparse(rowname, word, n)
 
 dim(sparse_words)
-
-
 ```
 
 One reason this overall approach is flexible and wonderful is that you could at this point cbind() other columns, such as non-text numeric data, onto this sparse matrix. Then you can use this combination of text and non-text data as your predictors in the machine learning algorithm, and the regularized regression algorithm we are going to use will find which are important for your problem space. I’ve experienced great results with my real world prediction problems using this approach.- Julia Silge
@@ -207,7 +206,7 @@ coefs %>%
        subtitle = "Elastic-Net Model")
 
 
-ggsave("coefs.png", units = "mm", width = 215, height = 100)
+# ggsave("coefs.png", units = "mm", width = 215, height = 250)
 ```
 
 # Test set trial
@@ -269,7 +268,44 @@ accuracy
 
 Results seem a little bit overfit by looking at the coefficients, but that can be handled. A big question is wheter a comment may not have any words of the ones specified in the coefficients.
 
-```{r}
+# Evaluación y aplicación del modelo en los datos generales
 
+Missing the training on the complete data
+
+```{r}
+tidy_final <- clean_verbatim %>% 
+  select(rowname, `Name/Id`, Comentarios, ELTDEC_numero, 
+         ELTDEC_designation, FCT_numero, FCT_designation, 
+         ESO_num_PG, ESO_designation_PG, PIE_numero, 
+         PIE_designation, PIEIND_Dernier_indice, PIEIND_typologie, causa_rechazo) %>% 
+  mutate(Comentarios = str_replace_all(Comentarios, "\n", " "),
+         causa_rechazo = as.character(causa_rechazo)) %>% 
+  unnest_tokens(word, Comentarios) %>%
+  group_by(word) %>%
+  filter(n() >= 5) %>%  
+  ungroup()
 ```
+
+
+```{r}
+final_classifications <- tidy_final %>%
+  inner_join(coefs, by = c("word" = "term")) %>%
+  group_by(rowname, `Name/Id`, class) %>%
+  summarize(score = sum(estimate)) %>%
+  mutate(probability = plogis(score)) %>% 
+  summarize(prob = max(probability), 
+            response = class[which(probability == max(probability))]) %>% 
+  ungroup()
+```
+
+
+```{r}
+final_validation <- final_classifications %>%
+  left_join(clean_verbatim %>%
+    select(causa_rechazo, rowname), by = "rowname") %>%
+  mutate(response = fct_relevel((as_factor(response)), "técnico", "forma", "procedimiento"))
+
+write_excel_csv2(final_validation, "final_validation.csv")
+```
+
 

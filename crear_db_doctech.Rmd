@@ -24,7 +24,7 @@ library(tidyverse)
 library(data.table)
 library(lubridate)
 #Lectura de archivos
-raw_xjd <- fread("XJD_S48.csv") %>% as_tibble()
+raw_xjd <- fread("XJD_S49.csv") %>% as_tibble()
 raw_lista <- fread("listado_consolidado.csv") %>% as_tibble()
 directorio <- raw_lista %>% 
   select(GFE = `Function Group`, DIRECTION = Department) %>% 
@@ -169,7 +169,7 @@ wide_tray <- tibble(date = seq.Date(from = ymd("2019-10-09"), to = ymd("2020-01-
 # wide_current %>%
 # write_csv("historic_wide.csv")
 
-fecha <- "2019-11-27"
+fecha <- "2019-12-04"
 
 wide_current <- desarrollos_final %>%
   group_by(DIRECTION) %>%
@@ -259,7 +259,6 @@ filtered_riesgo %>%
 
 desarrollos_final %>%
   semi_join(filtered_riesgo, by = "FCT_numero") %>%
-  mutate(perimetro = paste(ELTDEC_numero, ELTDEC_designation)) %>% 
   write_csv2("riesgo_funciones_xjd.csv")
 ```
 

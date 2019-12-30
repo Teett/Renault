@@ -1,0 +1,93 @@
+---
+title: "Riesgo planos"
+author: "Luis Daniel C."
+date: "8/21/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerías
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(writexl)
+library(readxl)
+```
+
+##lectura de datos de la extracción ó del resultado
+```{r}
+raw_planos <- fread("signe_export/rta_data.csv") %>% 
+  as_tibble()
+
+planos_rta <- read_xlsx("planos_rta.xlsx")
+```
+
+## Filtros para obtener planos
+```{r}
+planos_rta <- raw_planos %>%
+  mutate(PIEIND_typologie = as_factor(PIEIND_typologie)) %>% 
+  filter(str_starts(.$FCT_numero, "L", negate = TRUE) == TRUE) %>% #Eliminar fijaciones
+  filter(PIEIND_typologie == "Plan et Num 3D obligatoires" | 
+           PIEIND_typologie == "Plan de définition obligatoire") %>% #Sel req plano
+  filter(PIEIND_Dernier_statut == "BE") %>% #Sel únicamente validados
+  filter(DOCTECH_type == "Plan") %>% #Eliminar MDS y 3d
+  distinct(DOCTECH_numero, .keep_all = TRUE) #Planos únicos
+
+write_xlsx(planos_rta, "planos_rta.xlsx")
+```
+
+```{r}
+planos_dist <- planos_rta %>%
+  mutate(FAM_code = as_factor(FAM_code),
+         FCT_numero = str_remove(FCT_numero, "---"),
+         FCT_numero = as_factor(FCT_numero),
+         ELTDEC_numero = as_factor(ELTDEC_numero)) %>% 
+  group_by(FAM_code, ELTDEC_numero, FCT_numero) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  ungroup() %>% 
+  mutate(cum = cumsum(n),
+         cum_perc = cum / sum(n)) %>% 
+  filter(cum_perc <= 0.8) #Utilizar sólo las funciones que contienen el 80% de los planos
+
+planos_test <- planos_dist %>% 
+  select(ELTDEC_numero, FCT_numero, n, FAM_code)
+#base
+planos_dist %>%
+  ggplot(aes(x = fct_rev(fct_infreq(ELTDEC_numero)), y = n, fill = FAM_code)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~FAM_code, scales = "free_y") +
+  coord_flip() +
+  theme(legend.position = "none")
+
+
+
+bar_ordered_max <- function(perimetro, n_funciones) {
+bar_ordered <- planos_test %>%
+  filter(ELTDEC_numero == perimetro) %>%
+  top_n(n_funciones, wt = n) %>% 
+  arrange(FAM_code, desc(n)) %>% 
+  mutate(order = row_number())
+
+bar_ordered %>%
+ggplot(aes(x = rev(order), y = n, fill = FAM_code)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_x_continuous(
+    breaks = bar_ordered$order,
+    labels = bar_ordered$FCT_numero,
+    expand = c(0,0)
+  ) +
+  facet_wrap(~FAM_code, scales = "free")
+}
+
+bar_ordered_max("12",50)
+
+```
+

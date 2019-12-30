@@ -1,0 +1,85 @@
+---
+title: "Riesgo planos"
+author: "Luis Daniel C."
+date: "8/21/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerías
+
+```{r}
+library(data.table)
+library(tidyverse)
+```
+
+##lectura de datos de la extracción ó del resultado
+```{r}
+raw_planos <- fread("signe_export/rta_data.csv") %>% 
+  as_tibble()
+
+planos_rta <- fread("planos_rta.csv") %>% as_tibble() %>% 
+    mutate(FAM_code = as_factor(FAM_code),
+           FCT_numero = str_remove(FCT_numero, "---"),
+           FCT_numero = as_factor(FCT_numero),
+           ELTDEC_numero = as_factor(ELTDEC_numero))
+
+raw_planos <- fread("consolidado.csv") %>% as_tibble()
+```
+
+## Filtros para obtener planos
+```{r, eval = FALSE}
+planos_rta <- raw_planos %>%
+  mutate(PIEIND_typologie = as_factor(PIEIND_typologie)) %>% 
+  filter(str_starts(.$FCT_numero, "L", negate = TRUE) == TRUE) %>% #Eliminar fijaciones
+  filter(PIEIND_typologie == "Plan et Num 3D obligatoires" | 
+           PIEIND_typologie == "Plan de définition obligatoire") %>% #Sel req plano
+  filter(PIEIND_Dernier_statut == "BE") %>% #Sel únicamente validados
+  filter(DOCTECH_type == "Plan") %>% #Eliminar MDS y 3d
+  distinct(DOCTECH_numero, .keep_all = TRUE) #Planos únicos
+
+write_xlsx(planos_rta, "planos_rta.xlsx")
+```
+
+## Manipulación para cuenta del número de planos
+
+```{r}
+planos_count <- planos_rta %>%
+    group_by(FAM_code, ELTDEC_numero, FCT_numero, FCT_designation) %>% 
+    count() %>% 
+    arrange(desc(n)) %>% 
+    dplyr::ungroup() %>% 
+    mutate(cum = cumsum(n),
+           cum_perc = cum / sum(n))
+```
+
+## Cálculo del riesgo
+
+```{r}
+pt1_planos <- raw_planos %>%
+    #Simplificación evitando estados
+    filter(Maturity == "Validated" | Maturity == "Refused") %>%
+    #Cómputo por grupo de referencia
+    group_by(`Name / Id`, Designation) %>% 
+    #Contar frecuencias en Maturity por grupos
+    count(Maturity) %>% 
+    #Contar totales agrupados
+    mutate(total = sum(n),
+           riesgo = case_when(
+               Maturity == "Validated" & n == total ~ 0, #El riesgo es 0 si siempre ha sido validado
+               Maturity == "Refused" ~ (n/total)) #El riesgo es n / total si se ha rechazado
+           #Evitar cálculos individuales
+    ) %>% dplyr::ungroup() %>%
+    #Seleccionando sólo 1 fila por referencia - la correcta
+    filter(!is.na(riesgo)) %>% 
+    #match names con planos_rta
+    dplyr::rename("DOCTECH_numero" = `Name / Id`) %>%
+    #unión con planos_rta
+    left_join(planos_rta, by = "DOCTECH_numero")
+```
+

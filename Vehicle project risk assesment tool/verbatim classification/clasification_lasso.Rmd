@@ -66,7 +66,7 @@ clean_verbatim %>%
 Los perímetros B4, B1, 55, 56 Y 94 cuentan con menos de 10 observaciones. Se excluirán para el muestreo aleatorio y se agregarán posteriormente con su total de observaciones.
 
 ```{r}
-et.seed(1)
+set.seed(1)
 rare_eltdec <- clean_verbatim %>% 
   filter(ELTDEC_numero == "B4" | ELTDEC_numero == "B1" | ELTDEC_numero == "55" | ELTDEC_numero == "56" | ELTDEC_numero == "94")
 
